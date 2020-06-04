@@ -13,15 +13,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	app := os.Args[1]
-
 	nc, err := niniteclassic.New(".")
 	if err != nil {
 		panic(err)
 	}
 
 	as := make(chan niniteclassic.Status)
-	if err := nc.Select(app).Install(as); err != nil {
+	if err := nc.Select(os.Args[1:]...).Install(as); err != nil {
 		panic(err)
 	}
 
