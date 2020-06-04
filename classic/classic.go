@@ -48,11 +48,13 @@ type Classic struct {
 		outputFilename string
 		locales        []string
 	}
-	list bool
+	list  bool
+	audit bool
 }
 
 // Status is a status
 type Status struct {
+	Error   error
 	App     string
 	Status  string
 	Reason  string
@@ -61,6 +63,7 @@ type Status struct {
 
 // AppVersion is an available app version
 type AppVersion struct {
+	Error            error
 	App              string
 	Version          string
 	CurrentVersion   bool // ???: I don't think this indicates that it is installed nor the version that is presently installed
@@ -69,15 +72,16 @@ type AppVersion struct {
 
 // AppAudit is an app that may or may not be installed
 type AppAudit struct {
+	Error     error
 	App       string
 	Version   string
 	Status    string
 	Installed bool
 }
 
-var statusMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<status>[^\r\n\(\)]+)(?:\s+\((?P<reason>.+)\))?$`)
-var versionMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<type>[\*\(])?(?P<version>[^\r\n\(\)]+)\)?$`)
-var auditMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<status>[^\r\n\(\)\-]+)(?:\s+-\s+(?P<version>.+))?$`)
+var statusMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<status>[^\r\n\(\)]+)(?:\s+\((?P<reason>[^\r\n]+)\))?[\r\n]*$`)
+var versionMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<type>[\*\(])?(?P<version>[^\r\n\(\)]+)\)?[\r\n]*$`)
+var auditMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<status>[^\r\n\(\)\-]+)(?:\s+-\s+(?P<version>[^\r\n]+))?[\r\n]*$`)
 
 func (c Classic) composeArgs() []string {
 	args := []string{"/silent", "."}
@@ -156,12 +160,21 @@ func (c Classic) composeArgs() []string {
 		args = append(args, "/list", "versions")
 	}
 
+	if c.audit {
+		args = append(args, "/audit")
+	}
+
 	return args
 }
 
 func (c Classic) start() (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
 	args := c.composeArgs()
 	cmd := exec.Command(c.path, args...)
+
+	// for _, arg := range cmd.Args {
+	// 	fmt.Printf("%+v\n", arg)
+	// }
+	// os.Exit(1)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -180,14 +193,14 @@ func (c Classic) start() (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
 	return cmd, stdout, stderr, nil
 }
 
-// NewClassic returns a Classic, which uses the Ninite Pro Classic interface running on the local computer.
-func NewClassic(path string) (Classic, error) {
+// New returns a Classic, which uses the Ninite Pro Classic interface running on the local computer.
+func New(path string) (Classic, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return Classic{}, err
 	}
 	if fi.IsDir() {
-		return NewClassic(filepath.Join(path, "NinitePro.exe"))
+		return New(filepath.Join(path, "NinitePro.exe"))
 	}
 	return Classic{
 		path: path,
@@ -486,52 +499,70 @@ func (c Classic) List(versionChan chan<- AppVersion) error {
 
 // Audit lists all (or selected) Ninite-managed apps, including their versions and whether they are installed.
 func (c Classic) Audit(auditChan chan<- AppAudit) error {
-	c.list = true
+	c.audit = true
 
 	cmd, stdout, stderr, err := c.start()
 	if err != nil {
 		return err
 	}
-	defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
 
-	b := bufio.NewReader(stdout)
-	for {
-		line, err := b.ReadString('\n')
-		if err == io.EOF {
-			close(auditChan)
-			break
-		} else if err != nil {
-			return err
+	go func() {
+		defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
+
+		b := bufio.NewReader(stdout)
+		for {
+			line, err := b.ReadString('\n')
+			if err == io.EOF {
+				close(auditChan)
+				break
+			} else if err != nil {
+				auditChan <- AppAudit{
+					Error: err,
+				}
+				close(auditChan)
+				return
+			}
+
+			// fmt.Println("-----")
+			// fmt.Println(line)
+
+			if m := auditMatch.FindStringSubmatch(line); len(m) > 0 {
+				var installed bool
+				if len(m[3]) > 0 {
+					installed = true
+				}
+				auditChan <- AppAudit{
+					App:       m[1],
+					Status:    m[2],
+					Version:   m[3],
+					Installed: installed,
+				}
+			}
 		}
 
-		if m := auditMatch.FindStringSubmatch(line); len(m) > 0 {
-			var installed bool
-			if len(m[3]) > 0 {
-				installed = true
+		var stderrResult error
+		if se, err := ioutil.ReadAll(stderr); err == nil {
+			if len(se) > 0 {
+				stderrResult = errors.New(string(se)) // FIXME: this is naive
 			}
+		}
+
+		if err := cmd.Wait(); err != nil {
 			auditChan <- AppAudit{
-				App:       m[1],
-				Status:    m[2],
-				Version:   m[3],
-				Installed: installed,
+				Error: err,
 			}
+			close(auditChan)
+			return
 		}
-	}
 
-	var stderrResult error
-	if se, err := ioutil.ReadAll(stderr); err == nil {
-		if len(se) > 0 {
-			stderrResult = errors.New(string(se)) // FIXME: this is naive
+		if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
+			auditChan <- AppAudit{
+				Error: stderrResult,
+			}
+			close(auditChan)
+			return
 		}
-	}
-
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
-
-	if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
-		return stderrResult
-	}
+	}()
 
 	return nil
 }
