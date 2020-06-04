@@ -43,6 +43,7 @@ type Classic struct {
 
 	// verbs
 	updateOnly bool
+	install    bool
 	uninstall  bool
 	freeze     struct {
 		outputFilename string
@@ -79,11 +80,16 @@ type AppAudit struct {
 	Installed bool
 }
 
+// Errors
+var (
+	ErrMissingSelect = errors.New("Must first select apps")
+)
+
 var statusMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<status>[^\r\n\(\)]+)(?:\s+\((?P<reason>[^\r\n]+)\))?[\r\n]*$`)
 var versionMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<type>[\*\(])?(?P<version>[^\r\n\(\)]+)\)?[\r\n]*$`)
 var auditMatch = regexp.MustCompile(`^\s*(?P<app>[^:\r\n]+)\s+:\s+(?P<status>[^\r\n\(\)\-]+)(?:\s+-\s+(?P<version>[^\r\n]+))?[\r\n]*$`)
 
-func (c Classic) composeArgs() []string {
+func (c Classic) composeArgs() ([]string, error) {
 	args := []string{"/silent", "."}
 
 	//
@@ -148,6 +154,17 @@ func (c Classic) composeArgs() []string {
 		args = append(args, "/updateonly")
 	}
 
+	if c.install {
+		// the default action is to install if there is a selection, so nothing needed here to indicate install to NinitePro.exe.
+		if len(c.selectedApps) == 0 {
+			return []string{}, ErrMissingSelect
+		}
+	}
+
+	if c.uninstall {
+		args = append(args, "/uninstall")
+	}
+
 	if c.freeze.outputFilename != "" {
 		args = append(args, "/freeze")
 		if len(c.freeze.locales) > 0 {
@@ -164,11 +181,15 @@ func (c Classic) composeArgs() []string {
 		args = append(args, "/audit")
 	}
 
-	return args
+	return args, nil
 }
 
 func (c Classic) start() (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
-	args := c.composeArgs()
+	args, err := c.composeArgs()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	cmd := exec.Command(c.path, args...)
 
 	// for _, arg := range cmd.Args {
@@ -305,6 +326,68 @@ func (c Classic) CleanCache() Classic {
 // UpdateOnly performs an update on software that is already installed and does not cause any new software to become installed.
 func (c Classic) UpdateOnly(statusChan chan<- Status) error {
 	c.updateOnly = true
+
+	cmd, stdout, stderr, err := c.start()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
+
+		b := bufio.NewReader(stdout)
+		for {
+			line, err := b.ReadString('\n')
+			if err == io.EOF {
+				close(statusChan)
+				break
+			} else if err != nil {
+				statusChan <- Status{
+					Error: err,
+				}
+				close(statusChan)
+				return
+			}
+
+			if m := statusMatch.FindStringSubmatch(line); len(m) > 0 {
+				statusChan <- Status{
+					App:    m[1],
+					Status: m[2],
+					Reason: m[3],
+				}
+			}
+		}
+
+		var stderrResult error
+		if se, err := ioutil.ReadAll(stderr); err == nil {
+			if len(se) > 0 {
+				stderrResult = errors.New(string(se)) // FIXME: this is naive
+			}
+		}
+
+		if err := cmd.Wait(); err != nil {
+			statusChan <- Status{
+				Error: err,
+			}
+			close(statusChan)
+			return
+		}
+
+		if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
+			statusChan <- Status{
+				Error: stderrResult,
+			}
+			close(statusChan)
+			return
+		}
+	}()
+
+	return nil
+}
+
+// Install performs an install on selected Ninite-managed apps.
+func (c Classic) Install(statusChan chan<- Status) error {
+	c.install = true
 
 	cmd, stdout, stderr, err := c.start()
 	if err != nil {
