@@ -22,6 +22,9 @@ func main() {
 	}
 
 	for app := range ac {
+		if app.Error != nil {
+			panic(app.Error)
+		}
 		if *showOnlyInstalled && !app.Installed {
 			continue
 		}
