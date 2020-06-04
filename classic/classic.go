@@ -310,41 +310,56 @@ func (c Classic) UpdateOnly(statusChan chan<- Status) error {
 	if err != nil {
 		return err
 	}
-	defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
 
-	b := bufio.NewReader(stdout)
-	for {
-		line, err := b.ReadString('\n')
-		if err == io.EOF {
-			close(statusChan)
-			break
-		} else if err != nil {
-			return err
-		}
+	go func() {
+		defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
 
-		if m := statusMatch.FindStringSubmatch(line); len(m) > 0 {
-			statusChan <- Status{
-				App:    m[1],
-				Status: m[2],
-				Reason: m[3],
+		b := bufio.NewReader(stdout)
+		for {
+			line, err := b.ReadString('\n')
+			if err == io.EOF {
+				close(statusChan)
+				break
+			} else if err != nil {
+				statusChan <- Status{
+					Error: err,
+				}
+				close(statusChan)
+				return
+			}
+
+			if m := statusMatch.FindStringSubmatch(line); len(m) > 0 {
+				statusChan <- Status{
+					App:    m[1],
+					Status: m[2],
+					Reason: m[3],
+				}
 			}
 		}
-	}
 
-	var stderrResult error
-	if se, err := ioutil.ReadAll(stderr); err == nil {
-		if len(se) > 0 {
-			stderrResult = errors.New(string(se)) // FIXME: this is naive
+		var stderrResult error
+		if se, err := ioutil.ReadAll(stderr); err == nil {
+			if len(se) > 0 {
+				stderrResult = errors.New(string(se)) // FIXME: this is naive
+			}
 		}
-	}
 
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
+		if err := cmd.Wait(); err != nil {
+			statusChan <- Status{
+				Error: err,
+			}
+			close(statusChan)
+			return
+		}
 
-	if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
-		return stderrResult
-	}
+		if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
+			statusChan <- Status{
+				Error: stderrResult,
+			}
+			close(statusChan)
+			return
+		}
+	}()
 
 	return nil
 }
@@ -357,41 +372,56 @@ func (c Classic) Uninstall(statusChan chan<- Status) error {
 	if err != nil {
 		return err
 	}
-	defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
 
-	b := bufio.NewReader(stdout)
-	for {
-		line, err := b.ReadString('\n')
-		if err == io.EOF {
-			close(statusChan)
-			break
-		} else if err != nil {
-			return err
-		}
+	go func() {
+		defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
 
-		if m := statusMatch.FindStringSubmatch(line); len(m) > 0 {
-			statusChan <- Status{
-				App:    m[1],
-				Status: m[2],
-				Reason: m[3],
+		b := bufio.NewReader(stdout)
+		for {
+			line, err := b.ReadString('\n')
+			if err == io.EOF {
+				close(statusChan)
+				break
+			} else if err != nil {
+				statusChan <- Status{
+					Error: err,
+				}
+				close(statusChan)
+				return
+			}
+
+			if m := statusMatch.FindStringSubmatch(line); len(m) > 0 {
+				statusChan <- Status{
+					App:    m[1],
+					Status: m[2],
+					Reason: m[3],
+				}
 			}
 		}
-	}
 
-	var stderrResult error
-	if se, err := ioutil.ReadAll(stderr); err == nil {
-		if len(se) > 0 {
-			stderrResult = errors.New(string(se)) // FIXME: this is naive
+		var stderrResult error
+		if se, err := ioutil.ReadAll(stderr); err == nil {
+			if len(se) > 0 {
+				stderrResult = errors.New(string(se)) // FIXME: this is naive
+			}
 		}
-	}
 
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
+		if err := cmd.Wait(); err != nil {
+			statusChan <- Status{
+				Error: err,
+			}
+			close(statusChan)
+			return
+		}
 
-	if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
-		return stderrResult
-	}
+		if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
+			statusChan <- Status{
+				Error: stderrResult,
+			}
+			close(statusChan)
+			return
+		}
+	}()
 
 	return nil
 }
@@ -405,40 +435,55 @@ func (c Classic) Freeze(statusChan chan<- Status, output string, locales ...stri
 	if err != nil {
 		return err
 	}
-	defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
 
-	b := bufio.NewReader(stdout)
-	for {
-		line, err := b.ReadString('\n')
-		if err == io.EOF {
-			close(statusChan)
-			break
-		} else if err != nil {
-			return err
-		}
+	go func() {
+		defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
 
-		if m := statusMatch.FindStringSubmatch(line); len(m) > 0 {
-			statusChan <- Status{
-				App:     m[1],
-				Version: m[2],
+		b := bufio.NewReader(stdout)
+		for {
+			line, err := b.ReadString('\n')
+			if err == io.EOF {
+				close(statusChan)
+				break
+			} else if err != nil {
+				statusChan <- Status{
+					Error: err,
+				}
+				close(statusChan)
+				return
+			}
+
+			if m := statusMatch.FindStringSubmatch(line); len(m) > 0 {
+				statusChan <- Status{
+					App:     m[1],
+					Version: m[2],
+				}
 			}
 		}
-	}
 
-	var stderrResult error
-	if se, err := ioutil.ReadAll(stderr); err == nil {
-		if len(se) > 0 {
-			stderrResult = errors.New(string(se)) // FIXME: this is naive
+		var stderrResult error
+		if se, err := ioutil.ReadAll(stderr); err == nil {
+			if len(se) > 0 {
+				stderrResult = errors.New(string(se)) // FIXME: this is naive
+			}
 		}
-	}
 
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
+		if err := cmd.Wait(); err != nil {
+			statusChan <- Status{
+				Error: err,
+			}
+			close(statusChan)
+			return
+		}
 
-	if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
-		return stderrResult
-	}
+		if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
+			statusChan <- Status{
+				Error: stderrResult,
+			}
+			close(statusChan)
+			return
+		}
+	}()
 
 	return nil
 }
@@ -451,48 +496,63 @@ func (c Classic) List(versionChan chan<- AppVersion) error {
 	if err != nil {
 		return err
 	}
-	defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
 
-	b := bufio.NewReader(stdout)
-	for {
-		line, err := b.ReadString('\n')
-		if err == io.EOF {
-			close(versionChan)
-			break
-		} else if err != nil {
-			return err
+	go func() {
+		defer cmd.Wait() // ???: is this necessary? it is possible to return before cmd.Wait is run without this.
+
+		b := bufio.NewReader(stdout)
+		for {
+			line, err := b.ReadString('\n')
+			if err == io.EOF {
+				close(versionChan)
+				break
+			} else if err != nil {
+				versionChan <- AppVersion{
+					Error: err,
+				}
+				close(versionChan)
+				return
+			}
+
+			if m := versionMatch.FindStringSubmatch(line); len(m) > 0 {
+				var currentVersion, alternateVersion bool
+				if m[2] == "*" {
+					currentVersion = true
+				} else if m[2] == "(" {
+					alternateVersion = true
+				}
+				versionChan <- AppVersion{
+					App:              m[1],
+					Version:          m[3],
+					CurrentVersion:   currentVersion,
+					AlternateVersion: alternateVersion,
+				}
+			}
 		}
 
-		if m := versionMatch.FindStringSubmatch(line); len(m) > 0 {
-			var currentVersion, alternateVersion bool
-			if m[2] == "*" {
-				currentVersion = true
-			} else if m[2] == "(" {
-				alternateVersion = true
+		var stderrResult error
+		if se, err := ioutil.ReadAll(stderr); err == nil {
+			if len(se) > 0 {
+				stderrResult = errors.New(string(se)) // FIXME: this is naive
 			}
+		}
+
+		if err := cmd.Wait(); err != nil {
 			versionChan <- AppVersion{
-				App:              m[1],
-				Version:          m[3],
-				CurrentVersion:   currentVersion,
-				AlternateVersion: alternateVersion,
+				Error: err,
 			}
+			close(versionChan)
+			return
 		}
-	}
 
-	var stderrResult error
-	if se, err := ioutil.ReadAll(stderr); err == nil {
-		if len(se) > 0 {
-			stderrResult = errors.New(string(se)) // FIXME: this is naive
+		if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
+			versionChan <- AppVersion{
+				Error: stderrResult,
+			}
+			close(versionChan)
+			return
 		}
-	}
-
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
-
-	if stderrResult != nil { // if all is apparently well but there was text in stderr, use that as an error
-		return stderrResult
-	}
+	}()
 
 	return nil
 }
@@ -522,9 +582,6 @@ func (c Classic) Audit(auditChan chan<- AppAudit) error {
 				close(auditChan)
 				return
 			}
-
-			// fmt.Println("-----")
-			// fmt.Println(line)
 
 			if m := auditMatch.FindStringSubmatch(line); len(m) > 0 {
 				var installed bool
